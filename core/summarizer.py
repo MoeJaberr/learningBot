@@ -1,25 +1,41 @@
-# core/summarizer.py
+from core.client import get_client
 
-def summarize_transcript(transcript_text, openai_client):
-    """
-    Summarizes the given transcript text using OpenAI's chat model.
-    
-    Args:
-        transcript_text (str): The lecture content.
-        openai_client: An instance of OpenAI client (e.g., openai.OpenAI(api_key="..."))
 
-    Returns:
-        str: The generated summary text.
-    """
+def summarize_transcript(transcript_text: str) -> str | None:
+    client = get_client()
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4",
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            system=[
+                {
+                    "type": "text",
+                    "text": (
+                        "You are a helpful academic summarizer for university lectures. "
+                        "Produce a clear, structured summary with key concepts, main points, "
+                        "and actionable takeaways."
+                    ),
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=[
-                {"role": "system", "content": "You are a helpful academic summarizer for university lectures."},
-                {"role": "user", "content": f"Please summarize this lecture:\n\n{transcript_text[:4000]}"}
-            ]
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": transcript_text,
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                        {
+                            "type": "text",
+                            "text": "Summarize the lecture transcript above.",
+                        },
+                    ],
+                }
+            ],
         )
-        return response.choices[0].message.content
+        return response.content[0].text
     except Exception as e:
-        print(f"[!] Failed to summarize transcript: {e}")
+        print(f"[!] Failed to summarize: {e}")
         return None
