@@ -1,57 +1,45 @@
-# backend/tutor.py
+from core.client import get_client
 
-import openai
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
+def create_tutor_session(transcript_text: str):
+    """
+    Returns a chat(message: str) -> str callable backed by a running
+    conversation. The transcript is cached server-side for the session.
+    """
+    client = get_client()
+    history: list[dict] = []
 
-def start_socratic_tutor(transcript_path="output/transcript.txt"):
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("[!] OPENAI_API_KEY not found in .env.")
-        return
+    system = [
+        {
+            "type": "text",
+            "text": (
+                "You are a Socratic tutor helping a student understand lecture material. "
+                "Ask one guiding question at a time. "
+                "Guide the student toward understanding rather than giving direct answers. "
+                "Be concise and encouraging."
+            ),
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": f"Lecture transcript:\n\n{transcript_text[:8000]}",
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
 
-    if not os.path.exists(transcript_path):
-        print(f"[!] Transcript not found: {transcript_path}")
-        return
-
-    with open(transcript_path, "r", encoding="utf-8") as f:
-        transcript = f.read()
-
-    client = openai.OpenAI(api_key=api_key)
-
-    print("\n🧠 Tutoring Mode - Based on the following transcript:")
-    print("=" * 60)
-    print(transcript[:500] + "...\n")  # Preview only
-
-    question = input("❓ Do you have any questions or topics you struggled with? (or 'no'): ")
-    if question.strip().lower() == "no":
-        print("✅ No problem! You're done for now.")
-        return
-
-    while True:
+    def chat(user_message: str) -> str:
+        history.append({"role": "user", "content": user_message})
         try:
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a Socratic tutor helping a student understand lecture material. Ask one guiding question at a time, based on their confusion. Be interactive and student-led."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Here's what I didn't understand: {question}\nContext:\n{transcript[:2000]}"
-                    }
-                ]
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                system=system,
+                messages=history,
             )
-            reply = response.choices[0].message.content
-            print("\n💡 Tutor:", reply)
-            follow_up = input("\n🗣️ Your reply (or 'exit' to stop): ")
-            if follow_up.strip().lower() == "exit":
-                print("👋 Session ended.")
-                break
-            question = follow_up
+            reply = response.content[0].text
+            history.append({"role": "assistant", "content": reply})
+            return reply
         except Exception as e:
-            print(f"[!] Error during tutoring: {e}")
-            break
+            return f"[Tutor error: {e}]"
+
+    return chat
