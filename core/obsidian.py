@@ -1,72 +1,71 @@
-# core/obsidian.py
 import os
 from datetime import datetime
 
+from core.client import get_client
 
-def generate_obsidian_notes(transcript_text, openai_client):
-    """
-    Generates structured, Obsidian-friendly Markdown notes from a lecture transcript.
+LECTURES_SUBDIR = "Lectures"
 
-    Args:
-        transcript_text (str): Full transcript.
-        openai_client: An OpenAI client instance.
 
-    Returns:
-        str: Markdown-formatted notes for Obsidian.
-    """
-    prompt = f"""
-You are an AI assistant helping a student create Markdown notes from a lecture transcript.
-The student uses Obsidian and wants the following structure:
-- Use markdown headings and subheadings
-- Use bullet points where needed
-- Use bidirectional links in the form [[Term]]
-- Create aliases where appropriate using [[Full Term|Alias]]
-- Group content by topic, principle, or concept
-
-TRANSCRIPT:
-{transcript_text[:4000]}
-"""
+def generate_obsidian_notes(transcript_text: str) -> str | None:
+    client = get_client()
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4",
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
             messages=[
-                {"role": "user", "content": prompt}
-            ]
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": transcript_text,
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "Create structured Obsidian notes from this lecture transcript.\n\n"
+                                "Rules:\n"
+                                "- Use ## and ### headings to group by topic\n"
+                                "- Use bullet points for details\n"
+                                "- Use [[Term]] wikilinks for key concepts\n"
+                                "- Use [[Full Term|Alias]] for aliases where helpful\n"
+                                "- Output only the note body (no YAML frontmatter)"
+                            ),
+                        },
+                    ],
+                }
+            ],
         )
-        return response.choices[0].message.content
+        return response.content[0].text
     except Exception as e:
-        print(f"[!] Failed to generate Obsidian notes: {e}")
+        print(f"[!] Failed to generate notes: {e}")
         return None
 
-def save_obsidian_note(note_text, base_dir="output/notes", filename_prefix="lecture", aliases=None, tags=None):
-    """
-    Saves the generated notes to a Markdown file with Obsidian-friendly YAML frontmatter.
 
-    Args:
-        note_text (str): Markdown-formatted content.
-        base_dir (str): Target directory for saving the note.
-        filename_prefix (str): Filename prefix, e.g., 'lecture'.
-        aliases (list[str]): Optional list of aliases for the note.
-        tags (list[str]): Optional list of tags for the note.
+def save_obsidian_note(
+    note_text: str,
+    filename_prefix: str = "lecture",
+    aliases: list[str] | None = None,
+    tags: list[str] | None = None,
+) -> str:
+    vault_path = os.getenv("OBSIDIAN_VAULT_PATH", r"C:\Users\moe\Obsidian")
+    target_dir = os.path.join(vault_path, LECTURES_SUBDIR)
+    os.makedirs(target_dir, exist_ok=True)
 
-    Returns:
-        str: Path to the saved file.
-    """
-    os.makedirs(base_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     date_str = datetime.now().strftime("%Y-%m-%d")
-    file_path = os.path.join(base_dir, f"{filename_prefix}_{timestamp}.md")
+    file_path = os.path.join(target_dir, f"{filename_prefix}_{timestamp}.md")
 
-    yaml_frontmatter = "---\n"
+    frontmatter = "---\n"
     if aliases:
-        yaml_frontmatter += "aliases:\n" + ''.join(f"  - {alias}\n" for alias in aliases)
-    yaml_frontmatter += f"date: {date_str}\n"
-    yaml_frontmatter += "source: transcript\n"
+        frontmatter += "aliases:\n" + "".join(f"  - {a}\n" for a in aliases)
+    frontmatter += f"date: {date_str}\nsource: transcript\n"
     if tags:
-        yaml_frontmatter += "tags: [" + ', '.join(tags) + "]\n"
-    yaml_frontmatter += "---\n\n"
+        frontmatter += "tags: [" + ", ".join(tags) + "]\n"
+    frontmatter += "---\n\n"
 
     with open(file_path, "w", encoding="utf-8") as f:
-        f.write(yaml_frontmatter + note_text)
+        f.write(frontmatter + note_text)
 
     return file_path
